@@ -2,10 +2,35 @@ const loading = document.getElementById("loading");
 const canvas = document.getElementById("canvas");
 const musicChoice = document.getElementById("music-choice");
 
+const CACHE_NAME = "stardew-cache";
+
+async function isCached(key) {
+	try {
+		const cache = await caches.open(CACHE_NAME);
+		const match = await cache.match(key);
+		return !!match;
+	} catch { return false; }
+}
+
+async function readCache(key) {
+	try {
+		const cache = await caches.open(CACHE_NAME);
+		const match = await cache.match(key);
+		if (!match) return null;
+		return new Uint8Array(await match.arrayBuffer());
+	} catch { return null; }
+}
+
+async function writeCache(key, data) {
+	try {
+		const cache = await caches.open(CACHE_NAME);
+		await cache.put(key, new Response(data));
+	} catch {}
+}
+
 const wantMusic = await new Promise(async (resolve) => {
-	const root = await navigator.storage.getDirectory();
 	let hasAudio = false;
-	try { await root.getFileHandle("ContentAudio.tar.cache", { create: false }); hasAudio = true; } catch {}
+	try { hasAudio = await isCached("ContentAudio.tar"); } catch {}
 
 	if (hasAudio) {
 		document.getElementById("btn-no-music").innerHTML =
@@ -27,15 +52,11 @@ const wantMusic = await new Promise(async (resolve) => {
 musicChoice.style.display = "none";
 
 async function getTar(baseName, label) {
-	const root = await navigator.storage.getDirectory();
-	const cacheKey = baseName + ".cache";
-
-	try {
-		const fh = await root.getFileHandle(cacheKey, { create: false });
-		const file = await fh.getFile();
+	const cached = await readCache(baseName);
+	if (cached) {
 		loading.textContent = `Reading cached ${label}...`;
-		return new Uint8Array(await file.arrayBuffer());
-	} catch {}
+		return cached;
+	}
 
 	loading.textContent = `Downloading ${label}...`;
 	const countRes = await fetch(baseName + ".count");
@@ -65,10 +86,8 @@ async function getTar(baseName, label) {
 	}
 
 	loading.textContent = `Caching ${label}...`;
-	const fh = await root.getFileHandle(cacheKey, { create: true });
-	const writable = await fh.createWritable();
-	await writable.write(tar);
-	await writable.close();
+	await writeCache(baseName, tar);
+
 	return tar;
 }
 
@@ -132,7 +151,6 @@ const bootRuntime = async () => {
 
 const runtimePromise = bootRuntime();
 
-// Wait for both content download and runtime boot
 const [contentTar, runtime] = await Promise.all([contentPromise, runtimePromise]);
 
 const config = runtime.getConfig();
